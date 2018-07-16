@@ -5,6 +5,10 @@
 This program uses a reed sensor to monitor the status of the door (open/closed)
 and in case of status change an email is send.
 
+## Software
+
+Developed using the [Wiring Pi](http://wiringpi.com/) GPIO interface library.
+
 ## Hardware
 
  - Raspberry Pi 3 Model B Rev 1.2
