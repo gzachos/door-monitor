@@ -36,6 +36,7 @@
 #define __STR(val)                       #val
 #define STR(val)                         __STR(val)
 #define REED_SENSOR_PIN                  0
+#define BUZZER_PIN                       13
 #define DOOR_IS_CLOSED(state)            (state == LOW)
 #define DOOR_WAS_OPEN(state)             (state == HIGH)
 #define DOOR_WAS_CLOSED(state)           (state == LOW)
@@ -55,6 +56,7 @@ long      get_timestamp(void);
 thrarg_t *alloc_arg(long req_time, char *state);
 void     *notify_by_mail(void *arg);
 void      terminate(int signo);
+void     *hit_buzzer(void *arg);
 
 /* Global declarations */
 volatile sig_atomic_t exitflag = 0;
@@ -81,6 +83,7 @@ int main(void)
 		syslog(LOG_INFO, "piHiPri: %s", strerror(errno));
 
 	pinMode(REED_SENSOR_PIN, INPUT);
+	pinMode(BUZZER_PIN, OUTPUT);
 
 	for (; exitflag == 0;)
 	{
@@ -96,6 +99,7 @@ int main(void)
 		{
 			req_time = get_timestamp();
 			syslog(LOG_INFO, "%ld: Door opened\n", req_time);
+			pthread_create(&tid, &attr, &hit_buzzer, NULL);
 			arg = alloc_arg(req_time, "opened");
 			pthread_create(&tid, &attr, &notify_by_mail, (void *)arg);
 		}
@@ -180,5 +184,20 @@ void *notify_by_mail(void *arg)
 void terminate(int signo)
 {
 	exitflag = signo;
+}
+
+
+void *hit_buzzer(void *arg)
+{
+	int i;
+	for (i = 0; i < 3; i++)
+	{
+		digitalWrite(BUZZER_PIN, HIGH);
+		delay((unsigned) 1000);
+		digitalWrite(BUZZER_PIN, LOW);
+		delay((unsigned) 500);
+	}
+
+	return ((void *) EXIT_SUCCESS);
 }
 
