@@ -47,20 +47,21 @@
 
 typedef struct timeval timeval_t;
 typedef struct thrarg_s {
-	long req_time;
-	char *state;
+	timeval_t  req_timeval;
+	char      *state;
 } thrarg_t;
 
 /* Function prototypes */
-long      get_timestamp(void);
-thrarg_t *alloc_arg(long req_time, char *state);
+long      get_timestamp(timeval_t tv);
+thrarg_t *alloc_arg(timeval_t req_timeval, char *state);
 void     *notify_by_mail(void *arg);
 void      terminate(int signo);
 void     *hit_buzzer(void *arg);
+int       timevalcmp(timeval_t tv1, timeval_t tv2);
 
 /* Global declarations */
 volatile sig_atomic_t exitflag = 0;
-
+volatile timeval_t latest_closed_door;
 
 int main(void)
 {
@@ -68,8 +69,9 @@ int main(void)
 	                prev_state = -1;
 	pthread_attr_t  attr;
 	pthread_t       tid;
-	thrarg_t       *arg;
-	long            req_time;
+	thrarg_t       *arg, *buzzer_arg;
+	timeval_t       req_timeval;
+	long            req_timestamp;
 
 	openlog("door-monitor", LOG_PID, LOG_USER);
 	signal(SIGTERM, &terminate);
@@ -88,19 +90,21 @@ int main(void)
 	for (; exitflag == 0;)
 	{
 		curr_state = digitalRead(REED_SENSOR_PIN);
+		gettimeofday(&req_timeval, NULL);
+		req_timestamp = get_timestamp(req_timeval);
 		if (DOOR_CLOSED(curr_state, prev_state))
 		{
-			req_time = get_timestamp();
-			syslog(LOG_INFO, "%ld: Door closed\n", req_time);
-			arg = alloc_arg(req_time, "closed");
+			latest_closed_door = req_timeval;
+			syslog(LOG_INFO, "%ld: Door closed\n", req_timestamp);
+			arg = alloc_arg(req_timeval, "closed");
 			pthread_create(&tid, &attr, &notify_by_mail, (void *)arg);
 		}
 		if (DOOR_OPENED(curr_state, prev_state))
 		{
-			req_time = get_timestamp();
-			syslog(LOG_INFO, "%ld: Door opened\n", req_time);
-			pthread_create(&tid, &attr, &hit_buzzer, NULL);
-			arg = alloc_arg(req_time, "opened");
+			syslog(LOG_INFO, "%ld: Door opened\n", req_timestamp);
+			buzzer_arg = alloc_arg(req_timeval, "opened");
+			pthread_create(&tid, &attr, &hit_buzzer, (void *)buzzer_arg);
+			arg = alloc_arg(req_timeval, "opened");
 			pthread_create(&tid, &attr, &notify_by_mail, (void *)arg);
 		}
 		prev_state = curr_state;
@@ -115,18 +119,13 @@ int main(void)
 }
 
 
-long get_timestamp()
+long get_timestamp(timeval_t tv)
 {
-	timeval_t tv;
-	long req_time;
-
-	gettimeofday(&tv, NULL);
-	req_time = (long) tv.tv_sec + (tv.tv_usec)*1.0E-06;
-	return req_time;
+	return ((long) tv.tv_sec + (tv.tv_usec)*1.0E-06);
 }
 
 
-thrarg_t *alloc_arg(long req_time, char *state)
+thrarg_t *alloc_arg(timeval_t req_timeval, char *state)
 {
 	thrarg_t *arg;
 
@@ -136,7 +135,7 @@ thrarg_t *alloc_arg(long req_time, char *state)
 		syslog(LOG_INFO, "malloc: %s", strerror(errno));
 		return NULL;
 	}
-	arg->req_time = req_time;
+	arg->req_timeval = req_timeval;
 	arg->state = state;
 	return arg;
 }
@@ -146,16 +145,16 @@ void *notify_by_mail(void *arg)
 {
 	char      cmd[256], *state;
 	int       ret, attempts;
-	long      req_time;
+	long      req_timestamp;
 
 	if (!arg)
 		return ((void *) EXIT_FAILURE);
 
-	req_time = ((thrarg_t *) arg)->req_time;
-	state    = ((thrarg_t *) arg)->state;
+	req_timestamp = get_timestamp(((thrarg_t *) arg)->req_timeval);
+	state = ((thrarg_t *) arg)->state;
 
 	snprintf(cmd, 256, "%s/door-sendmail.sh %s %ld", STR(TARGET_DIR),
-		state, req_time);
+		state, req_timestamp);
 	for (attempts = 10; attempts > 0; attempts--)
 	{
 		ret = system(cmd);
@@ -165,13 +164,13 @@ void *notify_by_mail(void *arg)
 			if (ret == 0)
 			{
 				syslog(LOG_INFO, "%ld: Mail sent (%s)\n",
-					req_time, state);
+					req_timestamp, state);
 				free(arg);
 				return ((void *) EXIT_SUCCESS);
 			}
 		}
 		syslog(LOG_INFO, "%ld: Attempt to send mail #%d/9\n",
-			req_time, 10-attempts);
+			req_timestamp, 10-attempts);
 		pthread_yield();
 		delay((unsigned) 500);
 	}
@@ -190,6 +189,13 @@ void terminate(int signo)
 void *hit_buzzer(void *arg)
 {
 	int i;
+	timeval_t opendoor_time;
+
+	if (!arg)
+		return ((void *) EXIT_FAILURE);
+
+	opendoor_time = ((thrarg_t *) arg)->req_timeval;
+
 	for (i = 0; i < 3; i++)
 	{
 		digitalWrite(BUZZER_PIN, HIGH);
@@ -198,6 +204,34 @@ void *hit_buzzer(void *arg)
 		delay((unsigned) 500);
 	}
 
+	for (i = 0; timevalcmp(latest_closed_door, opendoor_time) == -1; i++)
+	{
+		if (i == 60)
+		{
+			delay((unsigned) 1000*5);
+			digitalWrite(BUZZER_PIN, HIGH);
+			delay((unsigned) 1000*5);
+			digitalWrite(BUZZER_PIN, LOW);
+		}
+		delay((unsigned) 900);
+	}
+	free(arg);
+
 	return ((void *) EXIT_SUCCESS);
 }
+
+
+int timevalcmp(timeval_t tv1, timeval_t tv2)
+{
+	if (tv1.tv_sec < tv2.tv_sec)
+		return (-1);
+	else if (tv1.tv_sec > tv2.tv_sec)
+		return (1);
+	else if (tv1.tv_usec < tv2.tv_usec)
+		return (-1);
+	else if (tv1.tv_usec > tv2.tv_usec)
+		return (1);
+	return (0);
+}
+
 
