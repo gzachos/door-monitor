@@ -195,8 +195,8 @@ void *hit_buzzer(void *arg)
 	if (!arg)
 		return ((void *) EXIT_FAILURE);
 
-	req_timestamp = get_timestamp(((thrarg_t *) arg)->req_timeval);
 	opendoor_time = ((thrarg_t *) arg)->req_timeval;
+	req_timestamp = get_timestamp(opendoor_time);
 
 	for (i = 0; i < 3; i++)
 	{
