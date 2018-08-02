@@ -189,11 +189,13 @@ void terminate(int signo)
 void *hit_buzzer(void *arg)
 {
 	int i;
+	long      req_timestamp;
 	timeval_t opendoor_time;
 
 	if (!arg)
 		return ((void *) EXIT_FAILURE);
 
+	req_timestamp = get_timestamp(((thrarg_t *) arg)->req_timeval);
 	opendoor_time = ((thrarg_t *) arg)->req_timeval;
 
 	for (i = 0; i < 3; i++)
@@ -206,14 +208,15 @@ void *hit_buzzer(void *arg)
 
 	for (i = 0; timevalcmp(latest_closed_door, opendoor_time) == -1; i++)
 	{
-		if (i == 60)
+		if (i == 60*5)
 		{
-			delay((unsigned) 1000*5);
+			syslog(LOG_INFO, "%ld: Door is still open\n", req_timestamp);
 			digitalWrite(BUZZER_PIN, HIGH);
 			delay((unsigned) 1000*5);
 			digitalWrite(BUZZER_PIN, LOW);
+			i = 0;
 		}
-		delay((unsigned) 900);
+		delay((unsigned) 1000);
 	}
 	free(arg);
 
