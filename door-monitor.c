@@ -38,6 +38,9 @@
 #define MAIN_THREAD                      0
 #define REED_SENSOR_PIN                  0
 #define BUZZER_PIN                       13
+#define ALERT_SWITCH_PIN                 2
+#define MASTER_SWITCH_PIN                3
+#define SWITCH_ISON(pin)                 (digitalRead(pin) == LOW)
 #define DOOR_IS_CLOSED(state)            (state == LOW)
 #define DOOR_WAS_OPEN(state)             (state == HIGH)
 #define DOOR_WAS_CLOSED(state)           (state == LOW)
@@ -93,6 +96,8 @@ int main(void)
 
 	pinMode(REED_SENSOR_PIN, INPUT);
 	pinMode(BUZZER_PIN, OUTPUT);
+	pinMode(ALERT_SWITCH_PIN, INPUT);
+	pinMode(MASTER_SWITCH_PIN, INPUT);
 
 	for (; ;)
 	{
@@ -112,16 +117,27 @@ int main(void)
 		{
 			latest_closed_door = req_timeval;
 			syslog(LOG_INFO, "%ld: Door closed\n", req_timestamp);
-			arg = alloc_arg(req_timeval, "closed");
-			pthread_create(&tid, &attr, &notify_by_mail, (void *)arg);
+			if (SWITCH_ISON(MASTER_SWITCH_PIN) ||
+					SWITCH_ISON(ALERT_SWITCH_PIN))
+			{
+				arg = alloc_arg(req_timeval, "closed");
+				pthread_create(&tid, &attr, &notify_by_mail,
+						(void *)arg);
+			}
 		}
 		if (DOOR_OPENED(curr_state, prev_state))
 		{
 			syslog(LOG_INFO, "%ld: Door opened\n", req_timestamp);
-			buzzer_arg = alloc_arg(req_timeval, "opened");
-			pthread_create(&tid, &attr, &hit_buzzer, (void *)buzzer_arg);
-			arg = alloc_arg(req_timeval, "opened");
-			pthread_create(&tid, &attr, &notify_by_mail, (void *)arg);
+			if (SWITCH_ISON(MASTER_SWITCH_PIN) ||
+					SWITCH_ISON(ALERT_SWITCH_PIN))
+			{
+				buzzer_arg = alloc_arg(req_timeval, "opened");
+				pthread_create(&tid, &attr, &hit_buzzer,
+						(void *)buzzer_arg);
+				arg = alloc_arg(req_timeval, "opened");
+				pthread_create(&tid, &attr, &notify_by_mail,
+						(void *)arg);
+			}
 		}
 		prev_state = curr_state;
 		delay((unsigned) 100);
