@@ -35,6 +35,7 @@
 /* Global definitions */
 #define __STR(val)                       #val
 #define STR(val)                         __STR(val)
+#define MAIN_THREAD                      0
 #define REED_SENSOR_PIN                  0
 #define BUZZER_PIN                       13
 #define DOOR_IS_CLOSED(state)            (state == LOW)
@@ -55,13 +56,17 @@ typedef struct thrarg_s {
 long      get_timestamp(timeval_t tv);
 thrarg_t *alloc_arg(timeval_t req_timeval, char *state);
 void     *notify_by_mail(void *arg);
+void      request_termination(int signo);
 void      terminate(int signo);
 void     *hit_buzzer(void *arg);
 int       timevalcmp(timeval_t tv1, timeval_t tv2);
 
 /* Global declarations */
-volatile sig_atomic_t exitflag = 0;
+volatile sig_atomic_t termination_requested = 0, exit_signal = 0;
+volatile int exitflag = 0;
 volatile timeval_t latest_closed_door;
+pthread_mutex_t exitflag_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_t tids[1];
 
 int main(void)
 {
@@ -74,9 +79,11 @@ int main(void)
 	long            req_timestamp;
 
 	openlog("door-monitor", LOG_PID, LOG_USER);
-	signal(SIGTERM, &terminate);
-	signal(SIGINT,  &terminate);
+	signal(SIGTERM, &request_termination);
+	signal(SIGINT,  &request_termination);
+	signal(SIGUSR1, &terminate);
 
+	tids[MAIN_THREAD] = pthread_self();
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
 
@@ -87,8 +94,17 @@ int main(void)
 	pinMode(REED_SENSOR_PIN, INPUT);
 	pinMode(BUZZER_PIN, OUTPUT);
 
-	for (; exitflag == 0;)
+	for (; ;)
 	{
+		if (termination_requested)
+		{
+			if (pthread_mutex_trylock(&exitflag_mutex) == 0)
+			{
+				exitflag = termination_requested;
+				pthread_mutex_unlock(&exitflag_mutex);
+				break;
+			}
+		}
 		curr_state = digitalRead(REED_SENSOR_PIN);
 		gettimeofday(&req_timeval, NULL);
 		req_timestamp = get_timestamp(req_timeval);
@@ -111,7 +127,10 @@ int main(void)
 		delay((unsigned) 100);
 	}
 
-	syslog(LOG_INFO, "Termination requested (%s)", strsignal(exitflag));
+	pthread_mutex_lock(&exitflag_mutex);
+	syslog(LOG_INFO, "Termination requested (%s)", strsignal(exit_signal));
+	pthread_mutex_unlock(&exitflag_mutex);
+
 	pthread_attr_destroy(&attr);
 	closelog();
 
@@ -180,9 +199,19 @@ void *notify_by_mail(void *arg)
 }
 
 
+void request_termination(int signo)
+{
+	exit_signal = signo;
+	if (pthread_self() == tids[MAIN_THREAD])
+		terminate(SIGUSR1);
+	else
+		pthread_kill(tids[MAIN_THREAD], SIGUSR1);
+}
+
+
 void terminate(int signo)
 {
-	exitflag = signo;
+	termination_requested = 1;
 }
 
 
