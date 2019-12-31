@@ -2,8 +2,7 @@
 
 ## About
 
-This program uses a reed sensor to monitor the status of the door (open/closed)
-and in case of status change an email is send.
+This program uses a reed sensor to monitor the status of a door (open/closed) and in case of status change an email is send. A buzzer is also sound everytime the door is opened and every 5 minutes if it remains open.
 
 ## Software
 
@@ -14,6 +13,7 @@ Developed using the [Wiring Pi](http://wiringpi.com/) GPIO interface library.
  - Raspberry Pi 3 Model B Rev 1.2
  - Reed switch
  - 10kΩ (kohm) resistor
+ - 5V active buzzer
  - Jumper wires
 
 ## Breadboard view
