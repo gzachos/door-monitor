@@ -96,6 +96,7 @@ int main(void)
 	signal(SIGTERM, &request_termination);
 	signal(SIGINT,  &request_termination);
 	signal(SIGUSR1, &request_termination);
+	signal(SIGUSR2, &request_termination);
 
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
@@ -109,17 +110,20 @@ int main(void)
 	pinMode(ALERT_SWITCH_PIN, INPUT);
 	pinMode(MASTER_SWITCH_PIN, INPUT);
 
-	/* Monitor door state (open/closed) until termination is requested by signal */
+	/* Monitor door state (open/closed) until termination
+	 * is requested by signal.
+	 */
 	for (; ;)
 	{
 		if (termination_requested)
 		{
+			syslog(LOG_INFO, "Termination requested (%s)",
+					strsignal(exit_signal));
 			if (pthread_mutex_trylock(&exitflag_mutex) == 0)
 			{
-				syslog(LOG_INFO, "Termination requested (%s)",
-						strsignal(exit_signal));
 				exitflag = termination_requested;
 				pthread_mutex_unlock(&exitflag_mutex);
+				syslog(LOG_INFO, "Termination flag set");
 				break;
 			}
 		}
@@ -165,7 +169,7 @@ int main(void)
 		delay((unsigned) 100);
 	}
 
-	syslog(LOG_INFO, "Termination completed\n");
+	syslog(LOG_INFO, "Termination completed (main thread)\n");
 
 	pthread_attr_destroy(&attr);
 	closelog();
@@ -267,7 +271,7 @@ void request_termination(int signo)
 		termination_requested = 1;
 	}
 	else
-		pthread_kill(tids[MAIN_THREAD], SIGUSR1);
+		pthread_kill(tids[MAIN_THREAD], signo);
 }
 
 
